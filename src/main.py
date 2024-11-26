@@ -1,15 +1,16 @@
 import ctranslate2
 from transformers import AutoTokenizer
 
-
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 from typing import Generator, List, Dict
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi import APIRouter, Request
 from protocol import ChatCompletionRequest, CompletionRequest
 import time
+from envs import environment_variables
 from protocol import (
     ChatCompletionLogProb,
     ChatCompletionLogProbs,
@@ -52,7 +53,7 @@ tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
 
 # Load the CTranslate2 model
 generator = ctranslate2.Generator(
-    "test_ct2", device_index=[0], device="cuda", inter_threads=8
+    "../test_ct2", device_index=[0], device="cuda", inter_threads=8
 )
 
 
@@ -74,7 +75,7 @@ def generate_response_text(
         word = tokenizer.decode(
             tokenizer.convert_tokens_to_ids(token.token), skip_special_tokens=True
         )
-        print(word)
+        # print(word)
         yield word
 
 
@@ -96,7 +97,7 @@ def completion_stream_response(
 ) -> Generator[str, None, None]:
     completion_tokens = 0
     for word in generate_response_text(input_tokens, max_tokens, temperature, top_p):
-        print("word: ", word)
+        # print("word: ", word)
         choice_data = CompletionResponseStreamChoice(
             index=0,
             text=word,
@@ -120,7 +121,7 @@ def completion_stream_response(
             )
 
         data = chunk.model_dump_json(exclude_unset=True)
-        print("here: ", data)
+        # print("here: ", data)
         yield f"data: {data}\n\n"
 
 
@@ -142,7 +143,7 @@ def chat_completion_stream_response(
 ) -> Generator[str, None, None]:
     completion_tokens = 0
     for word in generate_response_text(input_tokens, max_tokens, temperature, top_p):
-        print("word: ", word)
+        # print("word: ", word)
         choice_data = ChatCompletionResponseStreamChoice(
             index=0,
             delta=DeltaMessage(
@@ -169,7 +170,7 @@ def chat_completion_stream_response(
             )
 
         data = chunk.model_dump_json(exclude_unset=True)
-        print("here: ", data)
+        # print("here: ", data)
         yield f"data: {data}\n\n"
 
 
@@ -229,7 +230,7 @@ def completion_response(
 
 
 @app.post("/v1/completions")
-async def chat_completions(request: CompletionRequest, raw_request: Request):
+async def completions(request: CompletionRequest, raw_request: Request):
     # try:
     print(request)
 
@@ -335,6 +336,12 @@ def chat_completion_response(
 async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
     # try:
     print(request)
+    # print(raw_request.json())
+    API_KEY = os.environ.get("VLLM_API_KEY", None)
+    if raw_request.headers.get("Authorization") != "Bearer " + API_KEY:
+        return JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+    print(raw_request.headers.get("Authorization"))
+
     # Concatenate messages into a single prompt
     prompt = tokenizer.apply_chat_template(
         request.messages, add_generation_prompt=True, tokenize=False
